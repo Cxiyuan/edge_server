@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     
     steps:
     - name: Checkout code
@@ -38,11 +38,11 @@ jobs:
     
     - name: Build for Linux AMD64
       run: |
-        GOOS=linux GOARCH=amd64 go build -o edge-server-linux-amd64 .
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags '-linkmode external -extldflags "-static"' -o edge-server-linux-amd64 .
     
     - name: Build for Linux ARM64
       run: |
-        GOOS=linux GOARCH=arm64 go build -o edge-server-linux-arm64 .
+        CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags '-linkmode external -extldflags "-static"' -o edge-server-linux-arm64 .
     
     - name: Package Release
       run: |
