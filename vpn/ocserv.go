@@ -3,10 +3,8 @@ package vpn
 import (
 	"crypto/tls"
 	"edge_server/models"
-	"encoding/xml"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"time"
