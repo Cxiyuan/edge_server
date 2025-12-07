@@ -5,11 +5,8 @@ import (
 	"edge_server/handlers"
 	"edge_server/models"
 	"edge_server/vpn"
-	"fmt"
-	"io"
 	"io/fs"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 
