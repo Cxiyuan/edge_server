@@ -32,7 +32,9 @@ jobs:
         cd ..
     
     - name: Download Go dependencies
-      run: go mod download
+      run: |
+        go mod tidy
+        go mod download
     
     - name: Build for Linux AMD64
       run: |
