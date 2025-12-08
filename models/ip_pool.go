@@ -1,10 +1,8 @@
 package models
 
 import (
-	"database/sql"
 	"fmt"
 	"net"
-	"strings"
 )
 
 func AllocateIP(username string, groupID int) (string, error) {

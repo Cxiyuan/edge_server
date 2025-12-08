@@ -40,15 +40,9 @@ jobs:
       run: |
         CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags="-linkmode external -extldflags '-static'" -o edge-server-linux-amd64 .
     
-    - name: Build for Linux ARM64
-      run: |
-        sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-        CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc go build -ldflags="-linkmode external -extldflags '-static'" -o edge-server-linux-arm64 .
-    
     - name: Package Release
       run: |
         mkdir -p release/linux-amd64
-        mkdir -p release/linux-arm64
         
         cp edge-server-linux-amd64 release/linux-amd64/edge-server
         cp server.conf release/linux-amd64/
@@ -56,31 +50,23 @@ jobs:
         cp gen_cert.sh release/linux-amd64/
         cp deploy.sh release/linux-amd64/
         cp install_ocserv.sh release/linux-amd64/
+        cp build-docker.sh release/linux-amd64/
+        cp docker-compose.yml release/linux-amd64/
+        cp Dockerfile release/linux-amd64/
+        cp docker-entrypoint.sh release/linux-amd64/
+        cp DOCKER.md release/linux-amd64/
         cp -r scripts release/linux-amd64/
         chmod +x release/linux-amd64/init_db.sh
         chmod +x release/linux-amd64/gen_cert.sh
         chmod +x release/linux-amd64/deploy.sh
         chmod +x release/linux-amd64/install_ocserv.sh
+        chmod +x release/linux-amd64/build-docker.sh
+        chmod +x release/linux-amd64/docker-entrypoint.sh
         chmod +x release/linux-amd64/edge-server
         chmod +x release/linux-amd64/scripts/*.sh
         
-        cp edge-server-linux-arm64 release/linux-arm64/edge-server
-        cp server.conf release/linux-arm64/
-        cp init_db.sh release/linux-arm64/
-        cp gen_cert.sh release/linux-arm64/
-        cp deploy.sh release/linux-arm64/
-        cp install_ocserv.sh release/linux-arm64/
-        cp -r scripts release/linux-arm64/
-        chmod +x release/linux-arm64/init_db.sh
-        chmod +x release/linux-arm64/gen_cert.sh
-        chmod +x release/linux-arm64/deploy.sh
-        chmod +x release/linux-arm64/install_ocserv.sh
-        chmod +x release/linux-arm64/edge-server
-        chmod +x release/linux-arm64/scripts/*.sh
-        
         cd release
         tar -czf edge-server-linux-amd64.tar.gz linux-amd64/
-        tar -czf edge-server-linux-arm64.tar.gz linux-arm64/
     
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
