@@ -9,6 +9,7 @@ type UserGroup struct {
 	ID          int       `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	IPPool      string    `json:"ip_pool"`
 	Routes      string    `json:"routes"`
 	Policies    string    `json:"policies"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -109,6 +110,7 @@ func createTables() error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL UNIQUE,
 		description TEXT,
+		ip_pool TEXT,
 		routes TEXT,
 		policies TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -128,6 +130,16 @@ func createTables() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (group_id) REFERENCES user_groups(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS ip_allocations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		group_id INTEGER NOT NULL,
+		ip_address TEXT NOT NULL,
+		username TEXT,
+		allocated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (group_id) REFERENCES user_groups(id),
+		UNIQUE(group_id, ip_address)
 	);
 
 	CREATE TABLE IF NOT EXISTS online_users (
@@ -170,12 +182,22 @@ func createTables() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS system_config (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		config_key TEXT NOT NULL UNIQUE,
+		config_value TEXT,
+		description TEXT,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+	CREATE INDEX IF NOT EXISTS idx_ip_allocations_username ON ip_allocations(username);
 	CREATE INDEX IF NOT EXISTS idx_online_users_username ON online_users(username);
 	CREATE INDEX IF NOT EXISTS idx_auth_logs_username ON auth_logs(username);
 	CREATE INDEX IF NOT EXISTS idx_auth_logs_created ON auth_logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_access_logs_username ON access_logs(username);
 	CREATE INDEX IF NOT EXISTS idx_access_logs_created ON access_logs(created_at);
+	CREATE INDEX IF NOT EXISTS idx_system_config_key ON system_config(config_key);
 	`
 
 	_, err := DB.Exec(schema)
@@ -191,8 +213,8 @@ func initDefaultData() error {
 
 	if count == 0 {
 		_, err = DB.Exec(`
-			INSERT INTO user_groups (name, description, routes, policies) 
-			VALUES ('默认组', '系统默认用户组', '192.168.10.0/24,10.0.0.0/8', '{"allow_internet":true,"allow_lan":true}')
+			INSERT INTO user_groups (name, description, ip_pool, routes, policies) 
+			VALUES ('默认组', '系统默认用户组', '192.168.100.0/24', '192.168.10.0/24,10.0.0.0/8', '{"allow_internet":true,"allow_lan":true}')
 		`)
 		if err != nil {
 			return err
@@ -211,6 +233,38 @@ func initDefaultData() error {
 		`)
 		if err != nil {
 			return err
+		}
+	}
+
+	err = DB.QueryRow("SELECT COUNT(*) FROM system_config").Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		configs := []struct {
+			Key   string
+			Value string
+			Desc  string
+		}{
+			{"default_ip_pool", "192.168.100.0/24", "默认VPN IP地址池"},
+			{"default_dns1", "8.8.8.8", "默认DNS服务器1"},
+			{"default_dns2", "8.8.4.4", "默认DNS服务器2"},
+			{"default_mtu", "1400", "默认MTU值"},
+			{"max_clients", "100", "最大客户端连接数"},
+			{"idle_timeout", "3600", "空闲超时时间(秒)"},
+			{"vpn_domain", "edge-vpn.local", "VPN域名"},
+			{"vpn_device", "vpns", "VPN虚拟网卡名称"},
+		}
+
+		for _, cfg := range configs {
+			_, err = DB.Exec(`
+				INSERT INTO system_config (config_key, config_value, description) 
+				VALUES (?, ?, ?)
+			`, cfg.Key, cfg.Value, cfg.Desc)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

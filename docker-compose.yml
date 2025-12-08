@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  edge-vpn:
+    image: edge-server:latest
+    container_name: edge-vpn-server
+    restart: unless-stopped
+    
+    privileged: true
+    
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    
+    devices:
+      - /dev/net/tun
+    
+    ports:
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "8443:8443/tcp"
+    
+    volumes:
+      - ./data:/opt/edge_server/data
+      - ./ocserv_config:/etc/ocserv
+    
+    environment:
+      - WEB_PORT=443
+      - VPN_PORT=8443
+      - VPN_NETWORK=192.168.100.0/24
+      - VPN_HOSTNAME=edge-vpn.local
+      - DNS_SERVER1=8.8.8.8
+      - DNS_SERVER2=8.8.4.4
+      - MAX_CLIENTS=100
+      - IDLE_TIMEOUT=3600
+      - TZ=Asia/Shanghai
+    
+    networks:
+      - edge-vpn-network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:443/api/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  edge-vpn-network:
+    driver: bridge

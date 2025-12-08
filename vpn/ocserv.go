@@ -1,29 +1,36 @@
 package vpn
 
 import (
-	"crypto/tls"
+	"bufio"
 	"edge_server/models"
 	"fmt"
 	"log"
-	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type OCServConfig struct {
-	ServerCert string
-	ServerKey  string
-	ListenAddr string
-	IPPool     string
-	DNS        []string
-	MTU        int
+	ServerCert  string
+	ServerKey   string
+	ListenAddr  string
+	IPPool      string
+	DNS         []string
+	MTU         int
+	MaxClients  int
+	IdleTimeout int
+	ConfigDir   string
 }
 
 type OCServServer struct {
-	config *OCServConfig
-	server *http.Server
+	config  *OCServConfig
+	cmd     *exec.Cmd
+	mu      sync.Mutex
+	running bool
 }
 
 func NewOCServServer(config *OCServConfig) *OCServServer {
@@ -33,124 +40,146 @@ func NewOCServServer(config *OCServConfig) *OCServServer {
 }
 
 func (s *OCServServer) Start() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleAuth)
-	mux.HandleFunc("/auth", s.handleAuth)
-	mux.HandleFunc("/connect", s.handleConnect)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	cert, err := tls.LoadX509KeyPair(s.config.ServerCert, s.config.ServerKey)
-	if err != nil {
-		return fmt.Errorf("加载证书失败: %v", err)
+	if s.running {
+		return fmt.Errorf("ocserv 已在运行")
 	}
 
-	s.server = &http.Server{
-		Addr:    s.config.ListenAddr,
-		Handler: mux,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		},
+	if err := s.prepareConfig(); err != nil {
+		return fmt.Errorf("准备配置失败: %v", err)
 	}
 
-	log.Printf("OpenConnect VPN 服务启动在 %s", s.config.ListenAddr)
-	return s.server.ListenAndServeTLS("", "")
+	port, _ := strconv.Atoi(strings.TrimPrefix(s.config.ListenAddr, ":"))
+	configPath := filepath.Join(s.config.ConfigDir, "ocserv.conf")
+
+	s.cmd = exec.Command("ocserv", 
+		"-f",
+		"-c", configPath,
+	)
+
+	stdout, _ := s.cmd.StdoutPipe()
+	stderr, _ := s.cmd.StderrPipe()
+
+	if err := s.cmd.Start(); err != nil {
+		return fmt.Errorf("启动 ocserv 失败: %v", err)
+	}
+
+	s.running = true
+	log.Printf("ocserv VPN 服务已启动，端口: %d", port)
+
+	go s.monitorLogs(stdout, "STDOUT")
+	go s.monitorLogs(stderr, "STDERR")
+
+	go func() {
+		err := s.cmd.Wait()
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		if err != nil {
+			log.Printf("ocserv 进程退出: %v", err)
+		}
+	}()
+
+	return nil
 }
 
-func (s *OCServServer) handleAuth(w http.ResponseWriter, r *http.Request) {
-	username := r.FormValue("username")
-	password := r.FormValue("password")
+func (s *OCServServer) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	remoteIP := r.RemoteAddr
-	if idx := strings.LastIndex(remoteIP, ":"); idx != -1 {
-		remoteIP = remoteIP[:idx]
+	if !s.running || s.cmd == nil || s.cmd.Process == nil {
+		return fmt.Errorf("ocserv 未在运行")
 	}
 
-	if username == "" || password == "" {
-		s.logAuth(username, remoteIP, "login", false, "用户名或密码为空")
-		http.Error(w, "认证失败", http.StatusUnauthorized)
-		return
+	if err := s.cmd.Process.Signal(os.Interrupt); err != nil {
+		return fmt.Errorf("停止 ocserv 失败: %v", err)
 	}
 
-	var storedPassword string
-	var enabled bool
-	err := models.DB.QueryRow("SELECT password, enabled FROM users WHERE username=?", username).Scan(&storedPassword, &enabled)
-	if err != nil {
-		s.logAuth(username, remoteIP, "login", false, "用户不存在")
-		http.Error(w, "认证失败", http.StatusUnauthorized)
-		return
-	}
-
-	if !enabled {
-		s.logAuth(username, remoteIP, "login", false, "用户已禁用")
-		http.Error(w, "用户已禁用", http.StatusUnauthorized)
-		return
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(password)); err != nil {
-		s.logAuth(username, remoteIP, "login", false, "密码错误")
-		http.Error(w, "认证失败", http.StatusUnauthorized)
-		return
-	}
-
-	s.logAuth(username, remoteIP, "login", true, "认证成功")
-
-	xmlResp := `<?xml version="1.0" encoding="UTF-8"?>
-<auth id="success">
-<message>认证成功</message>
-</auth>`
-	w.Header().Set("Content-Type", "text/xml")
-	w.Write([]byte(xmlResp))
+	s.running = false
+	return nil
 }
 
-func (s *OCServServer) handleConnect(w http.ResponseWriter, r *http.Request) {
-	username := r.Header.Get("X-CSTP-Username")
-	if username == "" {
-		http.Error(w, "未认证", http.StatusUnauthorized)
-		return
+func (s *OCServServer) prepareConfig() error {
+	if s.config.ConfigDir == "" {
+		s.config.ConfigDir = "/etc/ocserv"
 	}
 
-	remoteIP := r.RemoteAddr
-	if idx := strings.LastIndex(remoteIP, ":"); idx != -1 {
-		remoteIP = remoteIP[:idx]
+	os.MkdirAll(s.config.ConfigDir, 0755)
+	os.MkdirAll("/run/ocserv", 0755)
+	os.MkdirAll("/var/lib/ocserv", 0755)
+
+	port, _ := strconv.Atoi(strings.TrimPrefix(s.config.ListenAddr, ":"))
+	
+	params := OCServConfigParams{
+		VPNPort:     port,
+		MaxClients:  s.config.MaxClients,
+		IdleTimeout: s.config.IdleTimeout,
+		ServerCert:  s.config.ServerCert,
+		ServerKey:   s.config.ServerKey,
+		IPPool:      s.config.IPPool,
+		DNS:         s.config.DNS,
 	}
 
-	virtualIP := s.allocateIP()
-	mac := generateMAC()
-
-	var groupName string
-	models.DB.QueryRow(`
-		SELECT g.name FROM users u 
-		LEFT JOIN user_groups g ON u.group_id = g.id 
-		WHERE u.username=?
-	`, username).Scan(&groupName)
-
-	_, err := models.DB.Exec(`
-		INSERT INTO online_users (username, group_name, mac, virtual_ip, remote_ip, protocol, virtual_dev, mtu, connected_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, username, groupName, mac, virtualIP, remoteIP, "DTLS", "vpns0", s.config.MTU, time.Now())
-
-	if err != nil {
-		log.Printf("记录在线用户失败: %v", err)
+	configPath := filepath.Join(s.config.ConfigDir, "ocserv.conf")
+	if err := GenerateOCServConfig(configPath, params); err != nil {
+		return err
 	}
 
-	configXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<config>
-<vpn-tunnel-type>full</vpn-tunnel-type>
-<session-token>%s</session-token>
-<ipv4>%s</ipv4>
-<netmask>255.255.255.0</netmask>
-<dns>%s</dns>
-<mtu>%d</mtu>
-</config>`, username, virtualIP, strings.Join(s.config.DNS, ","), s.config.MTU)
+	passwdPath := "/run/ocserv/ocpasswd"
+	if err := s.generatePasswordFile(passwdPath); err != nil {
+		return fmt.Errorf("生成密码文件失败: %v", err)
+	}
 
-	w.Header().Set("Content-Type", "text/xml")
-	w.Write([]byte(configXML))
-
-	s.logAuth(username, remoteIP, "connect", true, fmt.Sprintf("分配IP: %s", virtualIP))
+	return nil
 }
 
-func (s *OCServServer) allocateIP() string {
-	return "192.168.100.10"
+func (s *OCServServer) generatePasswordFile(path string) error {
+	rows, err := models.DB.Query("SELECT username, password FROM users WHERE enabled=1")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for rows.Next() {
+		var username, password string
+		if err := rows.Scan(&username, &password); err != nil {
+			continue
+		}
+		fmt.Fprintf(file, "%s:%s\n", username, password)
+	}
+
+	return nil
+}
+
+func (s *OCServServer) monitorLogs(pipe *os.File, source string) {
+	if pipe == nil {
+		return
+	}
+	defer pipe.Close()
+
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Printf("[ocserv-%s] %s", source, line)
+		
+		s.parseLogLine(line)
+	}
+}
+
+func (s *OCServServer) parseLogLine(line string) {
+	if strings.Contains(line, "user") && strings.Contains(line, "connected") {
+		
+	} else if strings.Contains(line, "disconnected") {
+		
+	}
 }
 
 func generateMAC() string {
@@ -158,14 +187,4 @@ func generateMAC() string {
 		time.Now().Unix()%256, 
 		time.Now().UnixNano()%256, 
 		time.Now().Nanosecond()%256)
-}
-
-func (s *OCServServer) logAuth(username, remoteIP, action string, success bool, message string) {
-	_, err := models.DB.Exec(`
-		INSERT INTO auth_logs (username, remote_ip, action, success, message) 
-		VALUES (?, ?, ?, ?, ?)
-	`, username, remoteIP, action, success, message)
-	if err != nil {
-		log.Printf("记录认证日志失败: %v", err)
-	}
 }

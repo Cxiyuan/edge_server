@@ -1,6 +1,7 @@
 <template>
   <div class="layout-container">
-    <el-container>
+    <router-view v-if="$route.path === '/login'" />
+    <el-container v-else>
       <el-header class="header">
         <div class="header-left">
           <el-icon :size="28" color="#409EFF"><Connection /></el-icon>
@@ -8,7 +9,10 @@
         </div>
         <div class="header-right">
           <el-icon :size="20"><User /></el-icon>
-          <span class="username">管理员</span>
+          <span class="username">{{ username }}</span>
+          <el-button type="primary" size="small" @click="handleLogout" style="margin-left: 16px">
+            退出登录
+          </el-button>
         </div>
       </el-header>
       <el-container>
@@ -40,6 +44,10 @@
               <el-icon><Document /></el-icon>
               <span>日志审计</span>
             </el-menu-item>
+            <el-menu-item index="/settings">
+              <el-icon><Setting /></el-icon>
+              <span>系统设置</span>
+            </el-menu-item>
           </el-menu>
         </el-aside>
         <el-main class="main-content">
@@ -51,7 +59,32 @@
 </template>
 
 <script setup>
-import { Connection, User, DataLine, Grid, Document } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
+import { Connection, User, DataLine, Grid, Document, Setting } from '@element-plus/icons-vue'
+
+const router = useRouter()
+const username = ref('管理员')
+
+onMounted(() => {
+  const storedUsername = localStorage.getItem('username')
+  if (storedUsername) {
+    username.value = storedUsername
+  }
+})
+
+const handleLogout = async () => {
+  try {
+    await ElMessageBox.confirm('确定要退出登录吗?', '提示', {
+      type: 'warning'
+    })
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    router.push('/login')
+  } catch (error) {
+  }
+}
 </script>
 
 <style scoped>

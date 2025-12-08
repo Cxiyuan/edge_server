@@ -12,6 +12,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="组名" width="150" />
         <el-table-column prop="description" label="描述" />
+        <el-table-column prop="ip_pool" label="IP地址池" width="150" />
         <el-table-column prop="routes" label="路由策略" width="200" />
         <el-table-column prop="policies" label="访问策略" width="200" />
         <el-table-column label="操作" width="180">
@@ -34,6 +35,9 @@
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="currentGroup.description" type="textarea" />
+        </el-form-item>
+        <el-form-item label="IP地址池">
+          <el-input v-model="currentGroup.ip_pool" placeholder="例如: 192.168.100.0/24" />
         </el-form-item>
         <el-form-item label="路由策略">
           <el-input v-model="currentGroup.routes" placeholder="例如: 192.168.10.0/24,10.0.0.0/8" />
@@ -60,6 +64,7 @@ const dialogVisible = ref(false)
 const currentGroup = ref({
   name: '',
   description: '',
+  ip_pool: '',
   routes: '',
   policies: ''
 })
@@ -77,7 +82,7 @@ const showDialog = (group = null) => {
   if (group) {
     currentGroup.value = { ...group }
   } else {
-    currentGroup.value = { name: '', description: '', routes: '', policies: '' }
+    currentGroup.value = { name: '', description: '', ip_pool: '', routes: '', policies: '' }
   }
   dialogVisible.value = true
 }

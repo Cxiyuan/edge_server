@@ -42,6 +42,13 @@
             {{ formatTime(scope.row.connected_at) }}
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="scope">
+            <el-button size="small" type="danger" @click="disconnectUser(scope.row.id)">
+              断开
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
@@ -50,7 +57,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 
 const onlineUsers = ref([])
@@ -62,6 +69,21 @@ const fetchOnlineUsers = async () => {
     onlineUsers.value = response.data.data || []
   } catch (error) {
     ElMessage.error('获取在线用户失败')
+  }
+}
+
+const disconnectUser = async (id) => {
+  try {
+    await ElMessageBox.confirm('确定要断开此用户的连接吗?', '警告', {
+      type: 'warning'
+    })
+    await axios.post(`/api/online/${id}/disconnect`)
+    ElMessage.success('断开成功')
+    fetchOnlineUsers()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('断开失败')
+    }
   }
 }
 
