@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"edge_server/models"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -159,7 +160,7 @@ func (s *OCServServer) generatePasswordFile(path string) error {
 	return nil
 }
 
-func (s *OCServServer) monitorLogs(pipe *os.File, source string) {
+func (s *OCServServer) monitorLogs(pipe io.ReadCloser, source string) {
 	if pipe == nil {
 		return
 	}
